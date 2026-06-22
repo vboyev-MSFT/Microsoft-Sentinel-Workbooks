@@ -1,0 +1,210 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "8e027a3b-3aca-43b8-aee1-c77740841716",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "value": { "durationMs": 604800000 },
+            "typeSettings": {
+              "selectableValues": [
+                { "durationMs": 86400000 },
+                { "durationMs": 604800000 },
+                { "durationMs": 2592000000 }
+              ]
+            }
+          },
+          {
+            "id": "745ec9a5-08bd-4956-82c9-259e8bec01af",
+            "version": "KqlParameterItem/1.0",
+            "name": "DeviceFilter",
+            "label": "Device Name (optional)",
+            "type": 1,
+            "isRequired": false,
+            "value": ""
+          },
+          {
+            "id": "0b91a553-614e-40fc-beff-4160cd6ad749",
+            "version": "KqlParameterItem/1.0",
+            "name": "AccountFilter",
+            "label": "Account (optional)",
+            "type": 1,
+            "isRequired": false,
+            "value": ""
+          }
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "# macOS Local AI Detection Dashboard\nThis workbook provides a point-in-time security snapshot of macOS endpoints running local AI tools (e.g., Ollama, OpenClaw). Use the filters above to adjust the time window or focus on specific devices/accounts.\n\n**Overview:** Key metrics across detection categories are shown below, followed by detailed results for each category."
+      }
+    },
+    {
+      "type": 3,
+      "name": "OverviewMetrics",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let MacDevices = DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId;\nlet invDevices = DeviceProcessEvents | where TimeGenerated > ago(30d) and DeviceId in (MacDevices) | where FileName in~ ('ollama','openclaw','ollama_llama_server','ollama-runner','mcp-server','codex','codex-cli','claude-code','npx','node','deno') or ProcessCommandLine has_any ('ollama','openclaw','ollama_llama_server','ollama-runner','mcp-server','codex','codex-cli','claude-code','npx','node','deno') | summarize Count = dcount(DeviceId);\nlet newAI = DeviceProcessEvents | where TimeGenerated > ago(1d) and DeviceId in (MacDevices) | where FileName in~ ('ollama', 'openclaw') or ProcessCommandLine has_any ('ollama', 'openclaw', 'openclaw.mjs') | join kind=leftanti (DeviceProcessEvents | where TimeGenerated between (ago(30d) .. ago(1d)) and DeviceId in (MacDevices) | where FileName in~ ('ollama', 'openclaw') or ProcessCommandLine has_any ('ollama', 'openclaw', 'openclaw.mjs') | distinct DeviceId, FileName, ProcessCommandLine) on DeviceId, FileName, ProcessCommandLine | summarize Count = count();\nlet localAPI = DeviceNetworkEvents | where TimeGenerated > ago(7d) and DeviceId in (MacDevices) | where ActionType startswith 'Listening' and LocalPort in (11434, 18789) | summarize Count = dcount(DeviceId);\nlet skillFiles = DeviceFileEvents | where TimeGenerated > ago(7d) and DeviceId in (MacDevices) | where ActionType in ('FileCreated', 'FileModified') | where tolower(FileName) in ('skill.md','skills.md','soul.md','memory.md','agents.md') | summarize Count = count();\nlet suspSkill = DeviceFileEvents | where TimeGenerated > ago(1d) and DeviceId in (MacDevices) | where ActionType == 'FileCreated' | where tolower(FileName) in ('skill.md', 'skills.md', 'soul.md') | where InitiatingProcessFileName in~ ('curl','wget','python','python3','bash','sh','zsh','nscurl','scp') or isnotempty(FileOriginUrl) | summarize Count = count();\nlet aiParent = DeviceProcessEvents | where TimeGenerated > ago(30d) and DeviceId in (MacDevices) | where tolower(InitiatingProcessFileName) in ('ollama','openclaw','node','npx','deno') or InitiatingProcessCommandLine has_any ('ollama','openclaw','openclaw.mjs') | where FileName in~ ('sh','bash','zsh','python','python3','curl','wget','scp','osascript','launchctl','security','dscl') | summarize Count = count();\nlet aiConn = DeviceNetworkEvents | where TimeGenerated > ago(30d) and DeviceId in (MacDevices) | where ActionType in ('ConnectionSuccess', 'ConnectionAttempt') | where InitiatingProcessFileName in~ ('ollama','openclaw','node','npx','deno') or InitiatingProcessCommandLine has_any ('ollama','openclaw') | where RemoteIPType == 'Public' | where RemoteUrl !has 'ollama' and RemoteUrl !has 'openclaw' and RemoteUrl !has 'openai.com' and RemoteUrl !has 'anthropic.com' | summarize Count = count();\nlet OCpersistence = DeviceFileEvents | where TimeGenerated > ago(1d) and DeviceId in (MacDevices) | where ActionType in ('FileCreated', 'FileModified') | where FolderPath has 'LaunchAgents' and FileName endswith '.plist' | where FileName contains 'openclaw' or InitiatingProcessFileName in~ ('openclaw', 'node') or InitiatingProcessCommandLine has 'openclaw' | summarize Count = count();\nunion (invDevices      | extend Category = 'Devices with AI Tools (30d)'),(newAI | extend Category = 'New AI Tool Executions (24h)'),(localAPI | extend Category = 'Local AI Servers (7d)'),(skillFiles | extend Category = 'AI Skill Files Modified (7d)'),(suspSkill | extend Category = 'Suspicious Skill File DLs (24h)'),(aiParent | extend Category = 'AI Procs Spawned Sensitive Cmd (30d)'),(aiConn | extend Category = 'External Connections by AI Procs (30d)'),(OCpersistence | extend Category = 'OpenClaw LaunchAgent Plists (24h)') | project Category, Count",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 8
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## AI Tool Inventory (Last 30 Days)\nList of macOS devices that have run local AI tool processes in the past 30 days, with first/last seen times, execution counts, and distinct user counts."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceProcessEvents\n| where TimeGenerated > ago(30d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where FileName in~ ('ollama','openclaw','ollama_llama_server','ollama-runner','mcp-server','codex','codex-cli','claude-code','npx','node','deno') or ProcessCommandLine has_any ('ollama','openclaw','ollama_llama_server','ollama-runner','mcp-server','codex','codex-cli','claude-code','npx','node','deno')\n| summarize FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated), ExecutionCount=count(), DistinctUsers=dcount(AccountName) by DeviceName, FileName, FolderPath\n| sort by LastSeen desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## First-Time AI Tool Usage (Last 24h)\nNew macOS AI tool processes seen in the last day that had no executions in the prior 30 days (potential new installations or reactivations)."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceProcessEvents\n| where TimeGenerated > ago(1d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where FileName in~ ('ollama', 'openclaw') or ProcessCommandLine has_any ('ollama', 'openclaw', 'openclaw.mjs')\n| join kind=leftanti (\n    DeviceProcessEvents\n    | where TimeGenerated between (ago(30d) .. ago(1d)) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n    | where FileName in~ ('ollama', 'openclaw') or ProcessCommandLine has_any ('ollama', 'openclaw', 'openclaw.mjs')\n    | distinct DeviceId, FileName, ProcessCommandLine\n) on DeviceId, FileName, ProcessCommandLine\n| summarize FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated), ExecCount=count() by DeviceName, FileName, ProcessCommandLine, AccountName\n| sort by LastSeen desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## Local AI Server Listeners\nIdentifies macOS devices hosting local AI server instances (e.g., port 11434 for the Ollama API, 18789 for OpenClaw)."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceNetworkEvents\n| where TimeGenerated > ago(7d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where ActionType startswith 'Listening' and LocalPort in (11434, 18789)\n| project TimeGenerated, DeviceName, LocalIP, Port=LocalPort, ProcessName=InitiatingProcessFileName, CommandLine=InitiatingProcessCommandLine, User=InitiatingProcessAccountName\n| sort by TimeGenerated desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## AI Skill/Context File Activity (7 Days)\nFile creation or modification of key AI skill or context files on macOS (e.g., skill.md, soul.md) in the last 7 days."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceFileEvents\n| where TimeGenerated > ago(7d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where ActionType in ('FileCreated', 'FileModified')\n| where tolower(FileName) in ('skill.md', 'skills.md', 'soul.md', 'memory.md', 'agents.md')\n| project TimeGenerated, DeviceName, FileName, FolderPath, ActionType\n| sort by TimeGenerated desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "### Suspicious Skill File Downloads (Last 24h)\nNewly created AI skill files in the last 24 hours via command-line tools or external downloads (potential malicious implant)."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceFileEvents\n| where TimeGenerated > ago(1d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where ActionType == 'FileCreated'\n| where tolower(FileName) in ('skill.md', 'skills.md', 'soul.md')\n| where InitiatingProcessFileName in~ ('curl','wget','python','python3','bash','sh','zsh','nscurl','scp') or isnotempty(FileOriginUrl)\n| project TimeGenerated, DeviceName, FileName, FolderPath, FileOriginUrl, InitiatingProcessFileName, InitiatingProcessCommandLine\n| sort by TimeGenerated desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## AI Parent-Child Process Spawns\nInstances where an AI-related process spawned a sensitive child process (shells, scripts, or network tools) on macOS in the last 30 days."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceProcessEvents\n| where TimeGenerated > ago(30d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where tolower(InitiatingProcessFileName) in ('ollama','openclaw','node','npx','deno') or InitiatingProcessCommandLine has_any ('ollama','openclaw','openclaw.mjs')\n| where FileName in~ ('sh','bash','zsh','python','python3','curl','wget','scp','osascript','launchctl','security','dscl')\n| project TimeGenerated, DeviceName, ParentProcess=InitiatingProcessFileName, ParentCmdLine=InitiatingProcessCommandLine, ChildProcess=FileName, ChildCmdLine=ProcessCommandLine, User=AccountName\n| sort by TimeGenerated desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## External Connections from AI Processes\nOutbound network connections initiated by local AI processes on macOS (last 30 days), excluding known AI service domains."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceNetworkEvents\n| where TimeGenerated > ago(30d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where ActionType in ('ConnectionSuccess', 'ConnectionAttempt')\n| where InitiatingProcessFileName in~ ('ollama','openclaw','node','npx','deno') or InitiatingProcessCommandLine has_any ('ollama','openclaw')\n| where RemoteIPType == 'Public'\n| where RemoteUrl !has 'ollama' and RemoteUrl !has 'openclaw' and RemoteUrl !has 'anthropic.com' and RemoteUrl !has 'openai.com'\n| project TimeGenerated, DeviceName, RemoteIP, RemoteUrl, RemotePort, ProcessName=InitiatingProcessFileName, CommandLine=InitiatingProcessCommandLine\n| sort by TimeGenerated desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "version": "NotebookText/1.0",
+        "markdown": "## OpenClaw LaunchAgent Persistence (Last 24h)\nDetects creation or modification of LaunchAgent plist files containing 'openclaw' in their name in the last 24 hours (possible OpenClaw persistence)."
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "DeviceFileEvents\n| where TimeGenerated > ago(1d) and DeviceId in (DeviceInfo | where OSPlatform == 'macOS' | distinct DeviceId)\n| where ActionType in ('FileCreated', 'FileModified')\n| where FolderPath has 'LaunchAgents' and FileName endswith '.plist'\n| where FileName contains 'openclaw' or InitiatingProcessFileName in~ ('openclaw', 'node') or InitiatingProcessCommandLine has 'openclaw'\n| project TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessFileName, InitiatingProcessCommandLine, User=InitiatingProcessAccountName\n| sort by TimeGenerated desc",
+        "visualization": "table",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "size": 0
+      }
+    }
+  ]
+}
